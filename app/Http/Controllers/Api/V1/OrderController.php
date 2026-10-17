@@ -3,47 +3,58 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\StoreOrderRequest;
+use App\Http\Resources\OrderResource;
+use App\Models\Order;
+use App\Services\OrderService;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    public function __construct(private OrderService $orders) {}
+
+    public function index(Request $request)
     {
-        //
+        $orders = $this->orders->paginateForUser($request->user()->id);
+
+        return OrderResource::collection($orders);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request)
+    public function store(StoreOrderRequest $request)
     {
-        //
+        $order = $this->orders->create(
+            $request->user()->id,
+            (float) $request->validated('total')
+        );
+
+        return (new OrderResource($order))
+            ->response()
+            ->setStatusCode(201);
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(string $id)
+    public function show(Order $order)
     {
-        //
+        $this->authorizeOwner($order);
+
+        return new OrderResource($order);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
+    public function pay(Order $order)
     {
-        //
+        $this->authorizeOwner($order);
+
+        return new OrderResource($this->orders->markAsPaid($order));
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
+    public function cancel(Order $order)
     {
-        //
+        $this->authorizeOwner($order);
+
+        return new OrderResource($this->orders->cancel($order));
+    }
+
+    private function authorizeOwner(Order $order): void
+    {
+        abort_unless($order->user_id === request()->user()->id, 404);
     }
 }
