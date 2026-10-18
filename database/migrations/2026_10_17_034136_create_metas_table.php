@@ -29,6 +29,8 @@ return new class extends Migration
             $table->foreignId('updated_by')->nullable()->constrained('users');
             $table->foreignId('ref_meta_id')->nullable()->constrained('metas')->nullOnDelete();
             $table->text('description')->nullable();
+            $table->text('table_name')->nullable();
+            $table->longText('query_string')->nullable();
             $table->json('json_config')->nullable();
             $table->timestamps();
             $table->foreignId('type_id')->nullable()->constrained('meta_types');
@@ -63,6 +65,12 @@ return new class extends Migration
             $table->string('expression_string')->nullable();
             $table->json('json_config')->nullable();
             $table->timestamps();
+            $table->foreignId('parent_id')
+                ->nullable()
+                ->after('main_meta_id')
+                ->constrained('meta_params')
+                ->cascadeOnDelete();
+            $table->index(['main_meta_id', 'parent_id', 'order_number']);
         });
 
 
@@ -73,6 +81,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        Schema::table('meta_params', function (Blueprint $table) {
+            $table->dropIndex(['main_meta_id', 'parent_id', 'order_number']);
+            $table->dropConstrainedForeignId('parent_id');
+        });
         Schema::dropIfExists('meta_params');
         Schema::dropIfExists('metas');
         Schema::dropIfExists('meta_types');

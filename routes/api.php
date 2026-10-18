@@ -1,12 +1,19 @@
 <?php
 
-use App\Http\Controllers\Api\V1\OrderController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\MetaController;
+use App\Http\Controllers\Api\V1\MetaParamController;
+use App\Models\User;
 
-Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
-    Route::get('orders', [OrderController::class, 'index']);
-    Route::post('orders', [OrderController::class, 'store']);
-    Route::get('orders/{order}', [OrderController::class, 'show']);
-    Route::post('orders/{order}/pay', [OrderController::class, 'pay']);
-    Route::post('orders/{order}/cancel', [OrderController::class, 'cancel']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/user', fn (Request $request) => $request->user());
+    Route::apiResource('metas', MetaController::class);
+    Route::apiResource('metas.params', MetaParamController::class)->shallow();
 });
