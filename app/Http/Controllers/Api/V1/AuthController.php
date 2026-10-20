@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,11 +20,17 @@ class AuthController extends Controller
             'password' => ['required', 'confirmed', Password::defaults()],
         ]);
 
+        $first = ! User::exists();
         $user = User::create([
             'name'     => $data['name'],
             'email'    => $data['email'],
             'password' => Hash::make($data['password']),
         ]);
+
+        // The very first account runs the place: it gets the admin role.
+        if ($first) {
+            $user->roles()->attach(Role::firstOrCreate(['code' => Role::ADMIN], ['name' => 'Administrator'])->id);
+        }
 
         return response()->json([
             'user'  => $user,

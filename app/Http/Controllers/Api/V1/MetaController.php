@@ -3,120 +3,111 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\V1\MetaRequest;
 use App\Models\Meta;
+use App\Support\Access;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class MetaController extends Controller
 {
+    /** GET /metas — every meta, with its type and how many rows it has. */
     public function index(Request $request): JsonResponse
     {
-        $metas = Meta::query()
-            ->with(['type', 'refMeta'])
-            ->when($request->filled('search'), function ($q) use ($request) {
-                $s = $request->string('search');
-                $q->where(fn ($q) => $q->where('code', 'like', "%{$s}%")
-                                       ->orWhere('name', 'like', "%{$s}%"));
-            })
-            ->when($request->filled('type_id'), fn ($q) => $q->where('type_id', $request->integer('type_id')))
-            ->when($request->has('is_active'), fn ($q) => $q->where('is_active', $request->boolean('is_active')))
-            ->latest()
-            ->paginate($request->integer('per_page', 15));
+        $metas = Access::viewable(Meta::query(), $request->user())->with(['type:id,code,name', 'refMeta:id,code,name'])
+            ->withCount('params')
+            ->orderBy('name')
+            ->get();
 
         return response()->json($metas);
     }
 
-    public function store(MetaRequest $request): JsonResponse
+    /**
+     * GET /metas/options — short list for dropdowns (ref_meta lookups).
+     * Defined before the resource routes so "options" isn't read as an id.
+     */
+    public function options(Request $request): JsonResponse
     {
-    $userId = $request->user()->id;
-    $data   = $request->validated();
-    $params = $data['params'] ?? [];
-    unset($data['params']);
+        $options = Access::viewable(Meta::query(), $request->user())->with('type:id,code')
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'type_id'])
+            ->map(fn (Meta $m) => [
+                'id' => $m->id,
+                'code' => $m->code,
+                'name' => $m->name,
+                'type' => $m->type?->code,
+            ]);
 
-    $meta = DB::transaction(function () use ($data, $params, $userId) {
-        $meta = Meta::create([
-            ...$data,
-            'created_by' => $userId,
-            'updated_by' => $userId,
+        return response()->json($options);
+    }
+
+    /** POST /metas */
+    public function store(Request $request): JsonResponse
+    {
+        Access::requireAdmin($request->user());
+        $data = $this->validated($request);
+        $data['created_by'] = $request->user()->id;
+        $data['updated_by'] = $request->user()->id;
+
+        $meta = Meta::create($data);
+
+        return response()->json($meta->load(['type', 'refMeta']), 201);
+    }
+
+    /** GET /metas/{meta} */
+    public function show(Request $request, Meta $meta): JsonResponse
+    {
+        Access::require($request->user(), $meta, 'view');
+
+        return response()->json($meta->load(['type', 'refMeta']));
+    }
+
+    /** PUT/PATCH /metas/{meta} */
+    public function update(Request $request, Meta $meta): JsonResponse
+    {
+        Access::requireAdmin($request->user());
+        $data = $this->validated($request, $meta);
+        $data['updated_by'] = $request->user()->id;
+
+        $meta->update($data);
+
+        return response()->json($meta->fresh()->load(['type', 'refMeta']));
+    }
+
+    /**
+     * DELETE /metas/{meta}
+     * Its params are removed (cascadeOnDelete). Metas that pointed at it lose the link (nullOnDelete).
+     */
+    public function destroy(Request $request, Meta $meta): JsonResponse
+    {
+        Access::requireAdmin($request->user());
+        $meta->delete();
+
+        return response()->json(null, 204);
+    }
+
+    private function validated(Request $request, ?Meta $current = null): array
+    {
+        $data = $request->validate([
+            'code' => [
+                $current ? 'sometimes' : 'required', 'string', 'max:100',
+                Rule::unique('metas', 'code')->ignore($current?->id),
+            ],
+            'name' => [$current ? 'sometimes' : 'required', 'string', 'max:255'],
+            'label_name' => ['nullable', 'string', 'max:255'],
+            'is_active' => ['sometimes', 'boolean'],
+            'type_id' => ['nullable', 'integer', 'exists:meta_types,id'],
+            'ref_meta_id' => ['nullable', 'integer', 'exists:metas,id'],
+            'description' => ['nullable', 'string'],
+            'table_name' => ['nullable', 'string', 'max:255'],
+            'query_string' => ['nullable', 'string'],
+            'json_config' => ['nullable', 'array'],
         ]);
 
-        if ($params) {
-            $meta->params()->createMany($params);
+        if (! empty($data['ref_meta_id']) && $current && (int) $data['ref_meta_id'] === $current->id) {
+            abort(422, 'A meta cannot reference itself.');
         }
 
-        return $meta;
-    });
-
-    return response()->json(
-        $meta->load(['type', 'refMeta', 'params.refMeta']),
-        201
-    );
-}
-
-    public function show(Meta $meta): JsonResponse
-{
-    return response()->json(
-        $meta->load([
-            'type',
-            'refMeta',
-            'creator',
-            'updater',
-            'params' => fn ($q) => $q->orderBy('order_number'),
-            'params.refMeta',
-        ])
-    );
-}
-
-public function update(MetaRequest $request, Meta $meta): JsonResponse
-{
-    $data   = $request->validated();
-    $params = $data['params'] ?? null; // null means "don't touch params"
-    unset($data['params']);
-
-    DB::transaction(function () use ($meta, $data, $params, $request) {
-        if ($data) {
-            $meta->update([
-                ...$data,
-                'updated_by' => $request->user()->id,
-            ]);
-        }
-
-        if ($params !== null) {
-            foreach ($params as $item) {
-                $id = $item['id'] ?? null;
-                unset($item['id']);
-
-                // Only match a param that belongs to this meta
-                $param = $id
-                    ? $meta->params()->whereKey($id)->first()
-                    : null;
-
-                if ($param) {
-                    $param->update($item);          // exists: update
-                } else {
-                    $meta->params()->create($item); // new or unknown id: insert
-                }
-            }
-        }
-    });
-
-    return response()->json(
-        $meta->fresh()->load(['type', 'refMeta', 'params.refMeta'])
-    );
-}
-
-    public function destroy(Meta $meta): Response
-{
-    DB::transaction(function () use ($meta) {
-        // Explicit, in case foreign keys aren't enforced on this database.
-        // With cascadeOnDelete this is already handled by the database.
-        $meta->params()->delete();
-        $meta->delete();
-    });
-
-    return response()->noContent();
-}
+        return $data;
+    }
 }

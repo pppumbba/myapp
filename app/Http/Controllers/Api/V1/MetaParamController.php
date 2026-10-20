@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Meta;
 use App\Models\MetaParam;
+use App\Support\Access;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -15,8 +16,10 @@ class MetaParamController extends Controller
      * GET /metas/{meta}/params
      * Returns the rows of one meta as a nested tree (roots first, children inside).
      */
-    public function index(Meta $meta): JsonResponse
+    public function index(Request $request, Meta $meta): JsonResponse
     {
+        Access::require($request->user(), $meta, 'view');
+
         $rows = MetaParam::where('main_meta_id', $meta->id)
             ->orderBy('order_number')
             ->get();
@@ -27,6 +30,7 @@ class MetaParamController extends Controller
     /** POST /metas/{meta}/params */
     public function store(Request $request, Meta $meta): JsonResponse
     {
+        Access::requireAdmin($request->user());
         $data = $this->validated($request, $meta);
         $data['main_meta_id'] = $meta->id;
 
@@ -36,14 +40,17 @@ class MetaParamController extends Controller
     }
 
     /** GET /params/{param} */
-    public function show(MetaParam $param): JsonResponse
+    public function show(Request $request, MetaParam $param): JsonResponse
     {
+        Access::require($request->user(), $param->main_meta_id, 'view');
+
         return response()->json($param->load('children'));
     }
 
     /** PUT/PATCH /params/{param} */
     public function update(Request $request, MetaParam $param): JsonResponse
     {
+        Access::requireAdmin($request->user());
         $data = $this->validated($request, $param->main, $param);
 
         $param->update($data);
@@ -52,8 +59,9 @@ class MetaParamController extends Controller
     }
 
     /** DELETE /params/{param} — children are removed too (cascadeOnDelete). */
-    public function destroy(MetaParam $param): JsonResponse
+    public function destroy(Request $request, MetaParam $param): JsonResponse
     {
+        Access::requireAdmin($request->user());
         $param->delete();
 
         return response()->json(null, 204);

@@ -8,6 +8,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // The create_metas migration now adds parent_id itself; only older databases need this.
+        if (Schema::hasColumn('meta_params', 'parent_id')) {
+            return;
+        }
+
         Schema::table('meta_params', function (Blueprint $table) {
             $table->foreignId('parent_id')
                 ->nullable()
