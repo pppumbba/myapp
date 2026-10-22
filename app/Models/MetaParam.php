@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Casts\MetaConfig;
+use App\Models\Concerns\HasMetaLinks;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,9 +15,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *  - owner form  -> field     (ref_meta_id = lookup/related meta)
  *  - owner tabs  -> tab       (ref_meta_id = the meta the tab shows)
  * parent_id nests rows inside each other at any level.
+ *
+ * A lookup (is_select with ref_meta_id) stores its record's value_field (id by default) and
+ * shows its display_field (by default the looked-up meta's is_label field, else name).
+ * is_label marks the field that names a meta's records. Links to other metas inside
+ * json_config live in meta_meta_map (see MetaConfig).
  */
 class MetaParam extends Model
 {
+    use HasMetaLinks;
+
     protected $table = 'meta_params';
 
     protected $fillable = [
@@ -45,7 +54,16 @@ class MetaParam extends Model
         'column_width',
         'expression_string',
         'json_config',
+        'display_field',
+        'value_field',
+        'is_label',
     ];
+
+    /** Links show inside json_config, as the screens read them. */
+    protected $hidden = ['links'];
+
+    /** For a lookup, the field it shows, so screens needn't load the looked-up meta to know. */
+    protected $appends = ['display_as'];
 
     protected $casts = [
         'order_number' => 'integer',
@@ -57,7 +75,8 @@ class MetaParam extends Model
         'is_merge' => 'boolean',
         'is_select' => 'boolean',
         'is_mandatory_criteria' => 'boolean',
-        'json_config' => 'array',
+        'is_label' => 'boolean',
+        'json_config' => MetaConfig::class,
     ];
 
     /** The meta (app, datagrid, form, ...) this row belongs to. */
@@ -75,6 +94,31 @@ class MetaParam extends Model
     public function parent(): BelongsTo
     {
         return $this->belongsTo(MetaParam::class, 'parent_id');
+    }
+
+    /** Links held in this row's json_config: drilldown, subgrid, scope, detail. */
+    public function links(): HasMany
+    {
+        return $this->hasMany(MetaMetaMap::class, 'src_param_id')->orderBy('id');
+    }
+
+    /** The looked-up record's column shown for it: display_field, else its meta's is_label field, else name. */
+    public function displayField(): string
+    {
+        return $this->display_field
+            ?: ($this->ref_meta_id ? MetaParam::where('main_meta_id', $this->ref_meta_id)->where('is_label', true)->value('field_path') : null)
+            ?: 'name';
+    }
+
+    public function getDisplayAsAttribute(): ?string
+    {
+        return $this->is_select && $this->ref_meta_id ? $this->displayField() : null;
+    }
+
+    /** The looked-up record's column a lookup stores: value_field, else id. */
+    public function valueField(): string
+    {
+        return $this->value_field ?: 'id';
     }
 
     public function children(): HasMany

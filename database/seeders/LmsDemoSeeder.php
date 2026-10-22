@@ -32,11 +32,17 @@ class LmsDemoSeeder extends Seeder
     use SeedsActions;
 
     private const CATEGORIES = ['Programming', 'Data', 'Design', 'Business', 'Languages'];
+
     private const LEVELS = ['beginner', 'intermediate', 'advanced'];
+
     private const COURSE_STATUSES = ['draft', 'published', 'in progress', 'completed', 'archived'];
+
     private const LESSON_KINDS = ['video', 'reading', 'quiz', 'assignment', 'live'];
+
     private const ENROLLMENT_STATUSES = ['enrolled', 'in progress', 'completed', 'dropped'];
+
     private const SESSION_KINDS = ['lecture', 'workshop', 'exam', 'office hours'];
+
     private const DEPARTMENTS = ['Engineering', 'Finance', 'Marketing', 'Sales', 'HR', 'Operations'];
 
     private array $types = [];
@@ -101,8 +107,8 @@ class LmsDemoSeeder extends Seeder
             ['instructors', 'Instructors', 'string', ['ref_meta_id' => $instructorGrid->id]],
         ]);
 
-        $instructor = ['is_select' => true, 'ref_meta_id' => $instructorGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']];
-        $student = ['is_select' => true, 'ref_meta_id' => $studentGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']];
+        $instructor = ['is_select' => true, 'ref_meta_id' => $instructorGrid->id, 'render_type' => 'lookup', 'display_field' => 'name'];
+        $student = ['is_select' => true, 'ref_meta_id' => $studentGrid->id, 'render_type' => 'lookup', 'display_field' => 'name'];
 
         // A course's lessons are edited as lines on the course form.
         $lessonForm = $this->meta('lms_lesson_form', 'Lesson', 'form', 'lms_lessons', 'One lesson in a course.');
@@ -130,7 +136,8 @@ class LmsDemoSeeder extends Seeder
             ['lessons', 'Lessons', 'detail', ['ref_meta_id' => $lessonForm->id, 'json_config' => ['foreign_key' => 'course_id']]],
         ]);
 
-        $courseGrid = $this->meta('lms_courses_grid', 'Courses', 'datagrid', 'lms_courses', 'Every course in the catalog.');
+        // Its filters (category, level, status) sit in a sidebar, with how many courses each value has.
+        $courseGrid = $this->meta('lms_courses_grid', 'Courses', 'datagrid', 'lms_courses', 'Every course in the catalog.', null, ['filter_layout' => 'sidebar']);
         $this->actions($courseGrid, $courseForm);
         $this->params($courseGrid, [
             ['id', 'ID', 'integer', ['is_primary' => true, 'is_show' => false]],
@@ -144,7 +151,7 @@ class LmsDemoSeeder extends Seeder
             ['status', 'Status', 'string', ['render_type' => 'status', 'is_criteria' => true]],
         ]);
 
-        $course = ['is_select' => true, 'ref_meta_id' => $courseGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'title']];
+        $course = ['is_select' => true, 'ref_meta_id' => $courseGrid->id, 'render_type' => 'lookup', 'display_field' => 'title'];
 
         $timeline = $this->meta('lms_course_timeline', 'Course timeline', 'gantt', 'lms_courses', 'When each course runs, by category.', $courseForm, [
             'start_field' => 'start_date',

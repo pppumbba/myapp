@@ -63,7 +63,7 @@ class CalendarDemoSeeder extends Seeder
             ['is_active', 'Status', 'boolean', ['render_type' => 'active']],
         ]);
 
-        $room = ['is_select' => true, 'ref_meta_id' => $roomGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']];
+        $room = ['is_select' => true, 'ref_meta_id' => $roomGrid->id, 'render_type' => 'lookup', 'display_field' => 'name'];
 
         $eventForm = $this->meta('cal_event_form', 'Event form', 'form', 'cal_events', 'Plan or change an event.');
         $this->params($eventForm, [

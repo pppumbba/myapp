@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Meta;
 use App\Models\MetaParam;
 use App\Support\Access;
+use App\Support\Autonumber;
+use App\Support\FilterLookups;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -21,8 +23,14 @@ class MetaParamController extends Controller
         Access::require($request->user(), $meta, 'view');
 
         $rows = MetaParam::where('main_meta_id', $meta->id)
+            ->with('links')
             ->orderBy('order_number')
             ->get();
+
+        // A filter without a lookup or list of its own picks with its form field's (filter_as).
+        foreach (FilterLookups::borrowed($meta, $rows) as $field => $formField) {
+            $rows->firstWhere('field_path', $field)?->setAttribute('filter_as', FilterLookups::describe($formField));
+        }
 
         return response()->json($this->buildTree($rows));
     }
@@ -102,6 +110,9 @@ class MetaParamController extends Controller
             'column_width' => ['nullable', 'string', 'max:50'],
             'expression_string' => ['nullable', 'string'],
             'json_config' => ['nullable', 'array'],
+            'display_field' => ['nullable', 'string', 'max:255'],
+            'value_field' => ['nullable', 'string', 'max:255'],
+            'is_label' => ['sometimes', 'boolean'],
         ]);
 
         // A row can't point at itself as its parent, and no row can be placed under its own descendant.
@@ -109,6 +120,11 @@ class MetaParamController extends Controller
             if ((int) $data['parent_id'] === $current->id || $this->isDescendant((int) $data['parent_id'], $current->id)) {
                 abort(422, 'A row cannot be moved under itself or one of its children.');
             }
+        }
+
+        $problem = Autonumber::problem($data['json_config']['autonumber'] ?? null);
+        if ($problem !== null) {
+            abort(response()->json(['message' => $problem, 'errors' => ['json_config' => [$problem]]], 422));
         }
 
         // A row can't reference the meta it belongs to (that would open the screen inside itself).

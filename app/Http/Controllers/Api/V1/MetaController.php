@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Meta;
 use App\Support\Access;
+use App\Support\MetaVersions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -14,7 +15,7 @@ class MetaController extends Controller
     /** GET /metas — every meta, with its type and how many rows it has. */
     public function index(Request $request): JsonResponse
     {
-        $metas = Access::viewable(Meta::query(), $request->user())->with(['type:id,code,name', 'refMeta:id,code,name'])
+        $metas = Access::viewable(Meta::query(), $request->user())->with(['type:id,code,name', 'refMeta:id,code,name', 'widget:id,code,name,renderer,icon', 'links', 'notificationLink'])
             ->withCount('params')
             ->orderBy('name')
             ->get();
@@ -51,7 +52,7 @@ class MetaController extends Controller
 
         $meta = Meta::create($data);
 
-        return response()->json($meta->load(['type', 'refMeta']), 201);
+        return response()->json($meta->load(['type', 'refMeta', 'widget']), 201);
     }
 
     /** GET /metas/{meta} */
@@ -59,7 +60,7 @@ class MetaController extends Controller
     {
         Access::require($request->user(), $meta, 'view');
 
-        return response()->json($meta->load(['type', 'refMeta']));
+        return response()->json($meta->load(['type', 'refMeta', 'widget']));
     }
 
     /** PUT/PATCH /metas/{meta} */
@@ -71,7 +72,7 @@ class MetaController extends Controller
 
         $meta->update($data);
 
-        return response()->json($meta->fresh()->load(['type', 'refMeta']));
+        return response()->json($meta->fresh()->load(['type', 'refMeta', 'widget']));
     }
 
     /**
@@ -81,6 +82,8 @@ class MetaController extends Controller
     public function destroy(Request $request, Meta $meta): JsonResponse
     {
         Access::requireAdmin($request->user());
+        // Kept as a version, so the meta can be restored.
+        MetaVersions::saveIfChanged($meta->id, $request->user(), 'Before deleting');
         $meta->delete();
 
         return response()->json(null, 204);
@@ -98,9 +101,16 @@ class MetaController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'type_id' => ['nullable', 'integer', 'exists:meta_types,id'],
             'ref_meta_id' => ['nullable', 'integer', 'exists:metas,id'],
+            // A widget meta's library entry (see Widget).
+            'widget_id' => ['nullable', 'integer', 'exists:widgets,id'],
             'description' => ['nullable', 'string'],
             'table_name' => ['nullable', 'string', 'max:255'],
             'query_string' => ['nullable', 'string'],
+            'load_expression_string' => ['nullable', 'string'],
+            'event_expression_string' => ['nullable', 'string'],
+            'before_save_expression_string' => ['nullable', 'string'],
+            'after_save_expression_string' => ['nullable', 'string'],
+            'var_fnc_expression_string' => ['nullable', 'string'],
             'json_config' => ['nullable', 'array'],
         ]);
 

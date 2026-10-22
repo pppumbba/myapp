@@ -28,6 +28,7 @@ class GanttDemoSeeder extends Seeder
     use SeedsActions;
 
     private const PROJECT_STATUSES = ['planning', 'active', 'on hold', 'done'];
+
     private const TASK_STATUSES = ['planned', 'in progress', 'blocked', 'done'];
 
     private array $types = [];
@@ -62,7 +63,7 @@ class GanttDemoSeeder extends Seeder
             ['status', 'Status', 'string', ['render_type' => 'status', 'is_criteria' => true]],
         ]);
 
-        $project = ['is_select' => true, 'ref_meta_id' => $projectGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']];
+        $project = ['is_select' => true, 'ref_meta_id' => $projectGrid->id, 'render_type' => 'lookup', 'display_field' => 'name'];
 
         $taskForm = $this->meta('pm_task_form', 'Task form', 'form', 'pm_tasks', 'Plan or update a task.');
         $this->params($taskForm, [

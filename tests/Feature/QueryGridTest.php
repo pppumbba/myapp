@@ -115,20 +115,21 @@ class QueryGridTest extends TestCase
 
         $this->getJson("/api/metas/{$grid}/actions")
             ->assertOk()
-            ->assertJsonCount(3)
+            // Add, Edit, Delete, and Import from ProcurementImportSeeder.
+            ->assertJsonCount(4)
             ->assertJsonPath('0.action', 'add')
             ->assertJsonPath('1.form.id', $form);
 
         $id = $this->postJson("/api/metas/{$grid}/actions", [
             'action' => 'custom', 'label' => 'Duplicate', 'form_meta_id' => $form, 'needs_row' => true,
             'json_config' => ['params' => ['id' => 'id']],
-        ])->assertCreated()->assertJsonPath('order_number', 4)->json('id');
+        ])->assertCreated()->assertJsonPath('order_number', 11)->json('id');
 
         $this->putJson("/api/actions/{$id}", ['label' => 'Copy'])->assertOk()->assertJsonPath('label', 'Copy');
         $this->postJson("/api/metas/{$grid}/actions", ['action' => 'explode', 'label' => 'X', 'form_meta_id' => $form])
             ->assertUnprocessable()->assertJsonValidationErrors(['action']);
 
         $this->deleteJson("/api/actions/{$id}")->assertNoContent();
-        $this->assertSame(3, MetaAction::where('grid_meta_id', $grid)->count());
+        $this->assertSame(4, MetaAction::where('grid_meta_id', $grid)->count());
     }
 }

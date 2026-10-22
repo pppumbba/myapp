@@ -12,6 +12,8 @@ use App\Models\WfmStatusPermission;
 use App\Models\WfmTransition;
 use App\Support\Access;
 use App\Support\Criteria;
+use App\Support\Notifier;
+use App\Support\SessionValues;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -174,6 +176,7 @@ class WorkflowController extends Controller
         });
 
         $this->notifyNext($request, $meta, $transition, $id, $data['source_id'] ?? null);
+        Notifier::statusChanged($meta, $table, $id, $transition->next_status_id, $request->user());
 
         return response()->json($this->state($request, $meta, $this->row($table, $id), $id));
     }
@@ -294,7 +297,7 @@ class WorkflowController extends Controller
             'sessionUserEmail' => $user?->email,
             'today' => now()->toDateString(),
             'now' => now()->toDateTimeString(),
-        ];
+        ] + SessionValues::for($user);
         try {
             return Criteria::passes($t->criteria, $vars) ? [true, null] : [false, "Needs: {$t->criteria}"];
         } catch (InvalidArgumentException $e) {

@@ -21,6 +21,18 @@ class MetaTypeSeeder extends Seeder
             ['code' => 'tabs', 'name' => 'Tabs', 'description' => 'Several screens grouped under tabs.'],
             ['code' => 'get', 'name' => 'Get', 'description' => 'A query that decides the values a form opens with.'],
             ['code' => 'workflow', 'name' => 'Workflow', 'description' => 'Statuses and the moves between them, for the records of a table.'],
+            ['code' => 'dashboard', 'name' => 'Dashboard', 'description' => 'A layout of charts, each placed and sized on a grid.'],
+            ['code' => 'chart', 'name' => 'Chart', 'description' => 'Numbers from a table or query, drawn as a chart or a single figure.'],
+            ['code' => 'statement', 'name' => 'Statement', 'description' => 'Records grouped by columns, with subtotals and a grand total, to print or export.'],
+            ['code' => 'report', 'name' => 'Report', 'description' => 'A printable document for one record, such as a purchase order.'],
+            ['code' => 'excel_import', 'name' => 'Excel import', 'description' => 'Loads the rows of an Excel file into a table, each column mapped and checked by a row.'],
+            ['code' => 'page', 'name' => 'Page', 'description' => 'A page built from widgets: headings, text, images, buttons, charts and grids.'],
+            ['code' => 'widget', 'name' => 'Widget', 'description' => 'One widget from the library, with its settings, placed on pages.'],
+            ['code' => 'notification', 'name' => 'Notification', 'description' => 'A message sent to people when records are added, changed or move to a status.'],
+            ['code' => 'widget_template', 'name' => 'Widget template', 'description' => 'The parts of a composite widget, laid out like a page.'],
+            ['code' => 'workspace', 'name' => 'Workspace', 'description' => 'One record and everything about it, such as a tender with its items, bidders and evaluation.'],
+            ['code' => 'stage_query', 'name' => 'Stage query', 'description' => 'SQL that changes data (INSERT, UPDATE, DELETE) with named parameters, run by hand, after a form saves or on a schedule.'],
+            ['code' => 'matrix', 'name' => 'Matrix', 'description' => 'A value for each pair of records from two grids, such as each bidder’s price for each item.'],
         ];
 
         // meta_types has no timestamps, so upsert through the query builder. Safe to run again.

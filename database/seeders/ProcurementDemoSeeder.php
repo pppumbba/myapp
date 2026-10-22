@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\DB;
  * A Procurement demo app built entirely from metas:
  *
  *   Procurement (app)
+ *   ├─ Overview           -> dashboard of chart metas (ProcurementDashboardSeeder)
+ *   ├─ Orders by supplier -> statement; Print an order -> report (ProcurementReportsSeeder)
  *   ├─ Purchasing (menu group)
  *   │  ├─ New request        -> Purchase request form
  *   │  ├─ Purchase requests  -> datagrid (opens the request form)
@@ -34,8 +36,37 @@ class ProcurementDemoSeeder extends Seeder
     use SeedsActions;
 
     private const DEPARTMENTS = ['Operations', 'Finance', 'IT', 'Sales', 'HR'];
+
     private const UNITS = ['pcs', 'box', 'kg', 'l', 'm', 'pack'];
+
+    /** The purchase order form's scripts: a worked-out total and a check before saving. */
+    public const ORDER_FORM_SCRIPTS = [
+        'var_fnc_expression_string' => <<<'JS'
+            // Shared by the scripts below.
+            function orderTotal() {
+              return round(sum('lines', (l) => num(l.quantity) * num(l.unit_price)), 2);
+            }
+            JS,
+        'load_expression_string' => <<<'JS'
+            readonly('total_amount');
+            set('total_amount', orderTotal());
+            JS,
+        'event_expression_string' => <<<'JS'
+            // A line's quantity or unit price changed, or a line was added or removed.
+            if (detail === 'lines' && (!field || field === 'quantity' || field === 'unit_price' || field === 'item_id')) {
+              set('total_amount', orderTotal());
+            }
+            JS,
+        'before_save_expression_string' => <<<'JS'
+            if (orderTotal() <= 0) {
+              error('Add at least one line with a quantity and a price.');
+            }
+            JS,
+        'after_save_expression_string' => null,
+    ];
+
     private const REQUEST_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'ordered'];
+
     private const ORDER_STATUSES = ['draft', 'sent', 'partially received', 'received', 'cancelled'];
 
     private array $types = [];
@@ -49,6 +80,9 @@ class ProcurementDemoSeeder extends Seeder
             $this->sampleData();
             $this->metas();
         });
+
+        // The statement, report, Overview dashboard, Excel imports, Welcome page and notifications, each also runnable on its own.
+        $this->call([ProcurementReportsSeeder::class, ProcurementDashboardSeeder::class, ProcurementImportSeeder::class, ProcurementPageSeeder::class, ProcurementNotificationsSeeder::class, ProcurementStageQueriesSeeder::class]);
     }
 
     private function metas(): void
@@ -104,11 +138,20 @@ class ProcurementDemoSeeder extends Seeder
             ['title', 'Title', 'string', ['is_required' => true, 'is_criteria' => true]],
             ['requested_by', 'Requested by', 'string'],
             ['department', 'Department', 'string', ['render_type' => 'select', 'json_config' => ['options' => self::DEPARTMENTS]]],
-            ['item_id', 'Item', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']]],
+            ['item_id', 'Item', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'display_field' => 'name']],
             ['quantity', 'Quantity', 'integer', ['is_required' => true, 'min_value' => '1', 'default_value' => '1']],
             ['needed_by', 'Needed by', 'date'],
             ['status', 'Status', 'string', ['is_required' => true, 'render_type' => 'select', 'default_value' => 'draft', 'json_config' => ['options' => self::REQUEST_STATUSES]]],
             ['notes', 'Notes', 'text', ['render_type' => 'textarea']],
+        ]);
+
+        $deliveryForm = $this->meta('proc_order_line_delivery_form', 'Order line delivery', 'form', 'proc_order_line_deliveries', 'One delivery of an order line: when, and how many came.');
+        $this->params($deliveryForm, [
+            ['id', 'ID', 'integer', ['is_primary' => true, 'is_show' => false]],
+            ['order_line_id', 'Order line', 'integer', ['is_show' => false]],
+            ['delivery_date', 'Delivered on', 'date', ['is_required' => true]],
+            ['quantity', 'Qty', 'integer', ['is_required' => true, 'min_value' => '1', 'default_value' => '1']],
+            ['note', 'Note', 'string'],
         ]);
 
         $lineForm = $this->meta('proc_order_line_form', 'Purchase order line', 'form', 'proc_purchase_order_lines', 'One item on a purchase order.');
@@ -116,17 +159,27 @@ class ProcurementDemoSeeder extends Seeder
             ['id', 'ID', 'integer', ['is_primary' => true, 'is_show' => false]],
             ['purchase_order_id', 'Order', 'integer', ['is_show' => false]],
             // Picking an item copies its price into the line.
-            ['item_id', 'Item', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name', 'fill' => ['unit_price' => 'unit_price']]]],
+            ['item_id', 'Item', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'display_field' => 'name', 'json_config' => ['fill' => ['unit_price' => 'unit_price']]]],
             ['description', 'Description', 'string'],
             ['quantity', 'Qty', 'integer', ['is_required' => true, 'min_value' => '1', 'default_value' => '1']],
             ['unit_price', 'Unit price', 'decimal', ['is_required' => true, 'min_value' => '0', 'render_type' => 'money']],
+            ['delivered_quantity', 'Delivered', 'integer'],
+            // Each line's own lines: its deliveries, adding up into delivered_quantity.
+            ['deliveries', 'Deliveries', 'detail', ['ref_meta_id' => $deliveryForm->id, 'json_config' => [
+                'foreign_key' => 'order_line_id',
+                'amount' => ['quantity'],
+                'total_field' => 'delivered_quantity',
+            ]]],
         ]);
 
         $orderForm = $this->meta('proc_order_form', 'Purchase order form', 'form', 'proc_purchase_orders', 'Place or update an order with a supplier.');
+        // Its scripts keep the total in step while lines are edited (the server still sums them on save).
+        $orderForm->update(self::ORDER_FORM_SCRIPTS);
         $this->params($orderForm, [
             ['id', 'ID', 'integer', ['is_primary' => true, 'is_show' => false]],
-            ['po_number', 'PO number', 'string', ['is_required' => true, 'is_unique' => true, 'is_criteria' => true]],
-            ['supplier_id', 'Supplier', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $supplierGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']]],
+            // Numbered when the order is added: PO-261021001, PO-261021002, ... starting at 001 each day.
+            ['po_number', 'PO number', 'string', ['is_required' => true, 'is_unique' => true, 'is_criteria' => true, 'json_config' => ['autonumber' => ['format' => 'PO-{yy}{MM}{dd}{seq:3}']]]],
+            ['supplier_id', 'Supplier', 'integer', ['is_select' => true, 'is_required' => true, 'ref_meta_id' => $supplierGrid->id, 'render_type' => 'lookup', 'display_field' => 'name']],
             ['order_date', 'Order date', 'date', ['is_required' => true]],
             ['expected_date', 'Expected delivery', 'date'],
             ['total_amount', 'Total amount', 'decimal', ['min_value' => '0', 'render_type' => 'money']],
@@ -145,10 +198,22 @@ class ProcurementDemoSeeder extends Seeder
             ['request_no', 'Request', 'string', ['is_criteria' => true]],
             ['title', 'Title', 'string', ['is_criteria' => true]],
             ['department', 'Department', 'string', ['is_criteria' => true]],
-            ['item_id', 'Item', 'integer', ['is_select' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'json_config' => ['label_field' => 'name']]],
+            ['requested_by', 'Requested by', 'string'],
+            ['item_id', 'Item', 'integer', ['is_select' => true, 'ref_meta_id' => $itemGrid->id, 'render_type' => 'lookup', 'display_field' => 'name']],
             ['quantity', 'Qty', 'integer'],
             ['needed_by', 'Needed by', 'date'],
             ['status', 'Status', 'string', ['render_type' => 'status', 'is_criteria' => true]],
+        ]);
+
+        // The same grid in tabs, each handing it values (a tab's json_config): Drafts and Waiting
+        // start filtered (people can change it); Mine always keeps to the signed-in person, and a
+        // request added there is theirs.
+        $requestTabs = $this->meta('proc_requests_tabs', 'Purchase requests', 'tabs', null, 'Requests by where they stand, and your own.');
+        $this->params($requestTabs, [
+            ['all', 'All', 'string', ['ref_meta_id' => $requestGrid->id]],
+            ['drafts', 'Drafts', 'string', ['ref_meta_id' => $requestGrid->id, 'json_config' => ['filters' => ['status' => 'draft']]]],
+            ['submitted', 'Waiting for approval', 'string', ['ref_meta_id' => $requestGrid->id, 'json_config' => ['filters' => ['status' => 'submitted']]]],
+            ['mine', 'Mine', 'string', ['ref_meta_id' => $requestGrid->id, 'json_config' => ['fixed' => ['requested_by' => '{user_name}']]]],
         ]);
 
         // Get metas decide what the order form opens with: a new order is dated today; editing
@@ -223,8 +288,9 @@ class ProcurementDemoSeeder extends Seeder
         $app = $this->meta('proc_app', 'Procurement', 'app', null, 'Requests, orders, suppliers and items.');
         $this->params($app, [
             ['purchasing', 'Purchasing', 'string', ['icon_cls' => 'cart', 'children' => [
-                ['new_request', 'New request', 'string', ['icon_cls' => 'plus', 'ref_meta_id' => $requestForm->id]],
-                ['purchase_requests', 'Purchase requests', 'string', ['icon_cls' => 'file', 'ref_meta_id' => $requestGrid->id]],
+                // A menu item hands its screen values too: a new request is needed by today unless changed.
+                ['new_request', 'New request', 'string', ['icon_cls' => 'plus', 'ref_meta_id' => $requestForm->id, 'json_config' => ['defaults' => ['needed_by' => '{today}']]]],
+                ['purchase_requests', 'Purchase requests', 'string', ['icon_cls' => 'file', 'ref_meta_id' => $requestTabs->id]],
                 ['purchase_orders', 'Purchase orders', 'string', ['icon_cls' => 'receipt', 'ref_meta_id' => $orderGrid->id]],
             ]]],
             ['master_data', 'Master data', 'string', ['icon_cls' => 'database', 'ref_meta_id' => $masterData->id]],

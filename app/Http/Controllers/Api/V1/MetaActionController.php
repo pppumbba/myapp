@@ -9,6 +9,7 @@ use App\Support\Access;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /** The toolbar buttons of a datagrid (see MetaAction). */
 class MetaActionController extends Controller
@@ -31,6 +32,7 @@ class MetaActionController extends Controller
     {
         Access::requireAdmin($request->user());
         $data = $this->validated($request);
+        $this->requireStageQuery($data);
         $data['grid_meta_id'] = $meta->id;
         $data['order_number'] ??= (int) MetaAction::where('grid_meta_id', $meta->id)->max('order_number') + 1;
 
@@ -41,7 +43,9 @@ class MetaActionController extends Controller
     public function update(Request $request, MetaAction $action): JsonResponse
     {
         Access::requireAdmin($request->user());
-        $action->update($this->validated($request, true));
+        $data = $this->validated($request, true);
+        $this->requireStageQuery($data + $action->only(['action', 'form_meta_id']));
+        $action->update($data);
 
         return response()->json($action->load(['form:id,code,name', 'get:id,code,name']));
     }
@@ -53,6 +57,22 @@ class MetaActionController extends Controller
         $action->delete();
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * A stage_query button runs a stage query meta, nothing else.
+     *
+     * @param  array{action?: string, form_meta_id?: int|null}  $data
+     */
+    private function requireStageQuery(array $data): void
+    {
+        if (($data['action'] ?? null) !== 'stage_query') {
+            return;
+        }
+        $type = Meta::with('type')->find($data['form_meta_id'] ?? null)?->type?->code;
+        if ($type !== 'stage_query') {
+            throw ValidationException::withMessages(['form_meta_id' => 'Choose a stage query for this button.']);
+        }
     }
 
     private function validated(Request $request, bool $partial = false): array
