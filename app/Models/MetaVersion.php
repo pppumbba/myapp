@@ -13,10 +13,11 @@ class MetaVersion extends Model
 {
     public const UPDATED_AT = null;
 
-    protected $fillable = ['meta_id', 'version_no', 'code', 'name', 'note', 'snapshot', 'hash', 'created_by'];
+    protected $fillable = ['meta_id', 'version_no', 'code', 'name', 'note', 'snapshot', 'hash', 'is_auto', 'created_by'];
 
     protected $casts = [
         'snapshot' => 'array',
+        'is_auto' => 'boolean',
         'version_no' => 'integer',
         'meta_id' => 'integer',
     ];

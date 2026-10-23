@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Models\Meta;
 use App\Models\MetaParam;
 use App\Models\MetaPermission;
+use App\Models\MetaVersion;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\WfmStatus;
+use App\Support\MetaVersions;
 use Database\Seeders\ProcurementDemoSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -133,5 +135,49 @@ class MetaVersionTest extends TestCase
 
         $this->getJson("/api/metas/{$this->form->id}/versions")->assertForbidden();
         $this->postJson("/api/metas/{$this->form->id}/versions")->assertForbidden();
+    }
+
+    public function test_a_change_saved_over_another_persons_keeps_theirs_as_a_version(): void
+    {
+        $alice = User::factory()->admin()->create(['name' => 'Alice']);
+        $bob = User::factory()->admin()->create(['name' => 'Bob']);
+
+        Sanctum::actingAs($alice);
+        $this->putJson("/api/metas/{$this->form->id}", ['name' => 'Alice’s name'])->assertOk();
+        // Bob's screen still has the old name, and sends it back with his own change.
+        Sanctum::actingAs($bob);
+        $this->putJson("/api/metas/{$this->form->id}", ['name' => $this->form->name, 'description' => 'Bob’s description'])->assertOk();
+
+        $versions = $this->getJson("/api/metas/{$this->form->id}/versions")->assertJsonPath('versions.0.note', 'Before a change by Bob')->json('versions');
+        $this->assertTrue($versions[0]['is_auto']);
+        $this->assertSame('Bob', $versions[0]['creator']['name']);
+
+        $this->postJson("/api/meta-versions/{$versions[0]['id']}/restore")->assertOk();
+        $this->assertSame('Alice’s name', $this->form->fresh()->name);
+    }
+
+    public function test_one_persons_changes_in_a_row_keep_one_version_every_ten_minutes(): void
+    {
+        $title = $this->param('title');
+        $this->putJson("/api/params/{$title->id}", ['label_name' => 'Subject'])->assertOk();
+        $this->putJson("/api/params/{$title->id}", ['label_name' => 'Topic'])->assertOk();
+        $this->assertSame(1, MetaVersion::where('meta_id', $this->form->id)->count());
+
+        $this->travel(MetaVersions::AUTO_EVERY + 1)->minutes();
+        $this->putJson("/api/params/{$title->id}", ['label_name' => 'Heading'])->assertOk();
+
+        $latest = MetaVersion::where('meta_id', $this->form->id)->orderByDesc('version_no')->first();
+        $this->assertSame(2, $latest->version_no);
+        $this->assertSame('Topic', collect($latest->snapshot['parts']['params'])->firstWhere('field_path', 'title')['label_name']);
+    }
+
+    public function test_a_refused_or_empty_change_keeps_no_version(): void
+    {
+        $this->putJson("/api/metas/{$this->form->id}", ['name' => $this->form->name])->assertOk();
+        $this->putJson("/api/metas/{$this->form->id}", ['type_id' => 999999])->assertUnprocessable();
+        Sanctum::actingAs(User::factory()->create());
+        $this->putJson("/api/metas/{$this->form->id}", ['name' => 'Not allowed'])->assertForbidden();
+
+        $this->assertSame(0, MetaVersion::where('meta_id', $this->form->id)->count());
     }
 }

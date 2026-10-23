@@ -62,6 +62,9 @@ class MetaParam extends Model
     /** Links show inside json_config, as the screens read them. */
     protected $hidden = ['links'];
 
+    /** Loaded with the params, in one query: json_config reads them for every param. */
+    protected $with = ['links'];
+
     /** For a lookup, the field it shows, so screens needn't load the looked-up meta to know. */
     protected $appends = ['display_as'];
 

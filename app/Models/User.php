@@ -28,12 +28,27 @@ class User extends Authenticatable
     /** @return int[] */
     public function roleIds(): array
     {
-        return $this->roles()->pluck('roles.id')->all();
+        return $this->perRequest('role_ids', fn () => $this->roles()->pluck('roles.id')->all());
     }
 
     public function isAdmin(): bool
     {
-        return $this->roles()->where('code', Role::ADMIN)->exists();
+        return $this->perRequest('is_admin', fn () => $this->roles()->where('code', Role::ADMIN)->exists());
+    }
+
+    /**
+     * Worked out once per request: access checks ask many times. Kept on the request, not
+     * the model, as one user object can outlive a request (e.g. Sanctum::actingAs in tests).
+     */
+    private function perRequest(string $key, callable $value): mixed
+    {
+        $cache = request()->attributes;
+        $key = "user.{$this->id}.{$key}";
+        if (! $cache->has($key)) {
+            $cache->set($key, $value());
+        }
+
+        return $cache->get($key);
     }
 
     /** What this user has been told about. */

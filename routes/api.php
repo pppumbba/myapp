@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\ScheduleController;
 use App\Http\Controllers\Api\V1\SessionValueController;
 use App\Http\Controllers\Api\V1\StageQueryController;
+use App\Http\Controllers\Api\V1\TagController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\WidgetController;
 use App\Http\Controllers\Api\V1\WorkflowController;
@@ -56,28 +57,35 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users', [UserController::class, 'index']);
     Route::put('/users/{user}/roles', [UserController::class, 'roles']);
     Route::get('/metas/{meta}/permissions', [PermissionController::class, 'meta']);
-    Route::put('/metas/{meta}/permissions', [PermissionController::class, 'saveMeta']);
+    Route::put('/metas/{meta}/permissions', [PermissionController::class, 'saveMeta'])->middleware('meta.version');
     Route::get('/workflows/{meta}/permissions', [PermissionController::class, 'workflow']);
     Route::put('/workflows/{meta}/permissions', [PermissionController::class, 'saveWorkflow']);
 
-    Route::apiResource('metas', MetaController::class);
-    Route::apiResource('metas.params', MetaParamController::class)->shallow();
+    // meta.version: a change to a meta or its parts keeps how it was as a version (SavesMetaVersion).
+    Route::apiResource('metas', MetaController::class)->middlewareFor('update', 'meta.version');
+    // Tags saying what metas are for: anyone adds one, admins rename and remove them.
+    Route::apiResource('tags', TagController::class)->except('show');
+    Route::apiResource('metas.params', MetaParamController::class)->shallow()->middlewareFor(['store', 'update', 'destroy'], 'meta.version');
 
     // A datagrid's toolbar buttons and the forms they open.
     Route::get('/metas/{meta}/actions', [MetaActionController::class, 'index']);
-    Route::post('/metas/{meta}/actions', [MetaActionController::class, 'store']);
-    Route::put('/actions/{action}', [MetaActionController::class, 'update']);
-    Route::delete('/actions/{action}', [MetaActionController::class, 'destroy']);
+    Route::middleware('meta.version')->group(function () {
+        Route::post('/metas/{meta}/actions', [MetaActionController::class, 'store']);
+        Route::put('/actions/{action}', [MetaActionController::class, 'update']);
+        Route::delete('/actions/{action}', [MetaActionController::class, 'destroy']);
+    });
 
     // Workflows: the designer's statuses and transitions, and moving records through them.
     Route::get('/workflows/{meta}', [WorkflowController::class, 'show']);
-    Route::put('/workflows/{meta}/layout', [WorkflowController::class, 'layout']);
-    Route::post('/workflows/{meta}/statuses', [WorkflowController::class, 'storeStatus']);
-    Route::put('/wfm-statuses/{status}', [WorkflowController::class, 'updateStatus']);
-    Route::delete('/wfm-statuses/{status}', [WorkflowController::class, 'destroyStatus']);
-    Route::post('/workflows/{meta}/transitions', [WorkflowController::class, 'storeTransition']);
-    Route::put('/wfm-transitions/{transition}', [WorkflowController::class, 'updateTransition']);
-    Route::delete('/wfm-transitions/{transition}', [WorkflowController::class, 'destroyTransition']);
+    Route::middleware('meta.version')->group(function () {
+        Route::put('/workflows/{meta}/layout', [WorkflowController::class, 'layout']);
+        Route::post('/workflows/{meta}/statuses', [WorkflowController::class, 'storeStatus']);
+        Route::put('/wfm-statuses/{status}', [WorkflowController::class, 'updateStatus']);
+        Route::delete('/wfm-statuses/{status}', [WorkflowController::class, 'destroyStatus']);
+        Route::post('/workflows/{meta}/transitions', [WorkflowController::class, 'storeTransition']);
+        Route::put('/wfm-transitions/{transition}', [WorkflowController::class, 'updateTransition']);
+        Route::delete('/wfm-transitions/{transition}', [WorkflowController::class, 'destroyTransition']);
+    });
     Route::get('/workflows/{meta}/records/{id}', [WorkflowController::class, 'record'])->whereNumber('id');
     Route::post('/workflows/{meta}/records/{id}/move', [WorkflowController::class, 'move'])->whereNumber('id');
 
@@ -98,9 +106,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/metas/{meta}/facets', [MetaDataController::class, 'facets']);
     Route::post('/metas/{meta}/data', [MetaDataController::class, 'store']);
     Route::get('/metas/{meta}/autonumber', [MetaDataController::class, 'autonumber']);
-    Route::get('/metas/{meta}/data/{id}', [MetaDataController::class, 'show'])->whereNumber('id');
-    Route::match(['put', 'patch'], '/metas/{meta}/data/{id}', [MetaDataController::class, 'update'])->whereNumber('id');
-    Route::delete('/metas/{meta}/data/{id}', [MetaDataController::class, 'destroy'])->whereNumber('id');
+    Route::get('/metas/{meta}/data/{id}', [MetaDataController::class, 'show'])->where('id', '[A-Za-z0-9_.:-]+');
+    Route::match(['put', 'patch'], '/metas/{meta}/data/{id}', [MetaDataController::class, 'update'])->where('id', '[A-Za-z0-9_.:-]+');
+    Route::delete('/metas/{meta}/data/{id}', [MetaDataController::class, 'destroy'])->where('id', '[A-Za-z0-9_.:-]+');
 
     // Excel: any data meta's records as a file, and excel_import metas loading files into a table.
     Route::get('/metas/{meta}/export', [MetaDataController::class, 'export']);
@@ -110,7 +118,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // The page builder: the widget library, and pages laid out from widget metas.
     Route::apiResource('widgets', WidgetController::class)->except('show');
     Route::get('/metas/{meta}/page', [PageController::class, 'show']);
-    Route::put('/metas/{meta}/page', [PageController::class, 'save']);
+    Route::put('/metas/{meta}/page', [PageController::class, 'save'])->middleware('meta.version');
 
     // The notification builder: what a notification meta would send, sending it, and its log.
     Route::get('/metas/{meta}/notification/preview', [NotificationRuleController::class, 'preview']);
@@ -130,7 +138,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Process flows: the forms a form's new record runs next, and the values they take.
     Route::get('/metas/{meta}/process-flow', [ProcessFlowController::class, 'show']);
-    Route::put('/metas/{meta}/process-flow', [ProcessFlowController::class, 'save']);
+    Route::put('/metas/{meta}/process-flow', [ProcessFlowController::class, 'save'])->middleware('meta.version');
 
     // Scheduled forms: when each schedule runs, and which form it runs over which grid's rows.
     Route::apiResource('schedules', ScheduleController::class)->except('show');

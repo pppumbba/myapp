@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\WfmStatus;
 use App\Support\Access;
 use App\Support\Autonumber;
+use App\Support\ExternalService;
 use App\Support\FilterLookups;
 use App\Support\NamedSql;
 use App\Support\Notifier;
@@ -37,7 +38,8 @@ use Throwable;
  * that a param names and that really exist are ever selected or written, and system tables
  * are refused, so a meta can't be pointed at users or the metas themselves. A meta with a
  * query_string reads from that query instead, as written: whoever edits metas is trusted
- * with SQL. Get metas (fill) decide the values a form opens with.
+ * with SQL. Get metas (fill) decide the values a form opens with. A meta with a service_url
+ * reads and writes an external REST service instead (see ExternalService).
  */
 class MetaDataController extends Controller
 {
@@ -74,8 +76,17 @@ class MetaDataController extends Controller
     public function index(Request $request, Meta $meta): JsonResponse
     {
         Access::require($request->user(), $meta, 'view');
-        $source = $this->source($meta);
         $perPage = min(max((int) $request->query('per_page', 20), 1), 100);
+        if (ExternalService::uses($meta)) {
+            $sort = $request->query('sort');
+
+            return response()->json(ExternalService::list(
+                $meta, $request->user(), $this->filters($request, 'filter') + $this->filters($request, 'scope'),
+                trim((string) $request->query('search', '')), is_string($sort) ? $sort : null,
+                $request->query('dir') === 'desc' ? 'desc' : 'asc', max(1, (int) $request->query('page', 1)), $perPage,
+            ));
+        }
+        $source = $this->source($meta);
 
         [$query, $missing] = $this->filtered($request, $meta, $source);
         if ($missing->isNotEmpty()) {
@@ -423,9 +434,13 @@ class MetaDataController extends Controller
     }
 
     /** GET /metas/{meta}/data/{id} */
-    public function show(Request $request, Meta $meta, int $id): JsonResponse
+    public function show(Request $request, Meta $meta, string $id): JsonResponse
     {
         Access::require($request->user(), $meta, 'view');
+        if (ExternalService::uses($meta)) {
+            return response()->json(ExternalService::find($meta, $request->user(), $id));
+        }
+        $id = (int) $id;
         $source = $this->source($meta, true);
         $row = $this->withoutHidden(DB::table($source['table'])->select($source['columns'])->where($source['key'], $id), $source, $request)->first();
 
@@ -439,6 +454,9 @@ class MetaDataController extends Controller
     {
         Access::require($request->user(), $meta, 'create');
         $this->requireWritable($meta);
+        if (ExternalService::uses($meta)) {
+            return response()->json(ExternalService::create($meta, $request->user(), $request->all()), 201);
+        }
         $source = $this->source($meta, true);
         $details = $this->details($meta);
         [$data, $lines] = $this->validated($request, $source, $details);
@@ -513,10 +531,14 @@ class MetaDataController extends Controller
     }
 
     /** PUT/PATCH /metas/{meta}/data/{id}. A detail sent replaces all of that record's lines. */
-    public function update(Request $request, Meta $meta, int $id): JsonResponse
+    public function update(Request $request, Meta $meta, string $id): JsonResponse
     {
         Access::require($request->user(), $meta, 'edit');
         $this->requireWritable($meta);
+        if (ExternalService::uses($meta)) {
+            return response()->json(ExternalService::update($meta, $request->user(), $id, $request->all()));
+        }
+        $id = (int) $id;
         $source = $this->source($meta, true);
         abort_unless($this->withoutHidden(DB::table($source['table'])->where($source['key'], $id), $source, $request)->exists(), 404, 'Record not found.');
 
@@ -535,10 +557,16 @@ class MetaDataController extends Controller
     }
 
     /** DELETE /metas/{meta}/data/{id}. Its detail lines go with it. */
-    public function destroy(Request $request, Meta $meta, int $id): JsonResponse
+    public function destroy(Request $request, Meta $meta, string $id): JsonResponse
     {
         Access::require($request->user(), $meta, 'delete');
         $this->requireWritable($meta);
+        if (ExternalService::uses($meta)) {
+            ExternalService::delete($meta, $request->user(), $id);
+
+            return response()->json(null, 204);
+        }
+        $id = (int) $id;
         $source = $this->source($meta, true);
         abort_unless($this->withoutHidden(DB::table($source['table'])->where($source['key'], $id), $source, $request)->exists(), 404, 'Record not found.');
         $details = $this->details($meta);
@@ -641,13 +669,34 @@ class MetaDataController extends Controller
         foreach ($details as $detail) {
             $s = $detail['source'];
             $lines = DB::table($s['table'])->select($s['columns'])->where($detail['foreign_key'], $id)->orderBy($s['key'])->get();
-            if ($detail['details']) {
-                $lines->each(fn (object $line) => $this->withDetails($line, $detail['details'], (int) $line->{$s['key']}));
-            }
+            $this->withSubLines($lines, $detail);
             $row->{$detail['field']} = $lines;
         }
 
         return $row;
+    }
+
+    /** Puts each line's own lines under it: one query per detail level, not per line. */
+    private function withSubLines(Collection $lines, array $detail): void
+    {
+        $key = $detail['source']['key'];
+        foreach ($detail['details'] as $sub) {
+            $s = $sub['source'];
+            $fk = $sub['foreign_key'];
+            $ids = $lines->pluck($key)->all();
+            $all = $ids === [] ? collect() : DB::table($s['table'])->select(array_values(array_unique([...$s['columns'], $fk])))
+                ->whereIn($fk, $ids)->orderBy($s['key'])->get();
+            $this->withSubLines($all, $sub);
+            $byParent = $all->groupBy(fn (object $line) => (string) $line->{$fk});
+            if (! in_array($fk, $s['columns'], true)) {
+                $all->each(function (object $line) use ($fk) {
+                    unset($line->{$fk});
+                });
+            }
+            $lines->each(function (object $line) use ($sub, $byParent, $key) {
+                $line->{$sub['field']} = $byParent->get((string) $line->{$key}, collect())->values();
+            });
+        }
     }
 
     /** Removes these lines of a detail, their own lines first. */

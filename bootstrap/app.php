@@ -1,9 +1,10 @@
 <?php
 
+use App\Exceptions\ServiceException;
+use App\Http\Middleware\SavesMetaVersion;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -14,9 +15,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(fn () => null);
+        $middleware->alias(['meta.version' => SavesMetaVersion::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->render(function (\App\Exceptions\ServiceException $e) {
+        $exceptions->render(function (ServiceException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         });
     })->create();

@@ -52,6 +52,20 @@ class NestedDetailsTest extends TestCase
         $this->getJson("/api/metas/{$this->form}/data/{$order['id']}")->assertOk()->assertJsonCount(2, 'lines.0.deliveries');
     }
 
+    public function test_lines_of_lines_load_in_one_query_however_many_lines(): void
+    {
+        $lines = array_map(fn (int $n) => $this->line('IT-002', $n, [['delivery_date' => '2026-10-25', 'quantity' => 1]]), range(1, 6));
+        $id = $this->postJson("/api/metas/{$this->form}/data", $this->order($lines))->assertCreated()->json('id');
+
+        DB::enableQueryLog();
+        $this->getJson("/api/metas/{$this->form}/data/{$id}")->assertOk()
+            ->assertJsonCount(6, 'lines')
+            ->assertJsonPath('lines.5.deliveries.0.quantity', fn ($v) => (float) $v === 1.0);
+        $deliveryQueries = collect(DB::getQueryLog())->filter(fn ($q) => str_contains($q['query'], 'proc_order_line_deliveries'));
+
+        $this->assertCount(1, $deliveryQueries);
+    }
+
     public function test_changing_lines_keeps_changes_and_removes_dropped_lines_with_their_own(): void
     {
         $order = $this->postJson("/api/metas/{$this->form}/data", $this->order([

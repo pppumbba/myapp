@@ -6,6 +6,7 @@ use App\Casts\MetaConfig;
 use App\Models\Concerns\HasMetaLinks;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -26,10 +27,16 @@ class Meta extends Model
         // A form's scripts: on load, on change, before and after save, and shared variables and functions.
         'load_expression_string', 'event_expression_string', 'before_save_expression_string',
         'after_save_expression_string', 'var_fnc_expression_string',
+        // An external REST service read and written instead of a table (see ExternalService).
+        'service_url', 'service_headers', 'service_query', 'service_list_path',
+        'service_total_path', 'service_record_path', 'service_update_method', 'service_list_body',
     ];
 
-    /** Links show inside json_config, as the screens read them. */
-    protected $hidden = ['links', 'notificationLink'];
+    /**
+     * Links show inside json_config, as the screens read them. A service's headers and list body
+     * may hold credentials, so only admins see them (MetaController makes them visible).
+     */
+    protected $hidden = ['links', 'notificationLink', 'service_headers', 'service_list_body'];
 
     protected $casts = [
         'is_active' => 'boolean',
@@ -72,6 +79,12 @@ class Meta extends Model
     public function notificationLink(): HasOne
     {
         return $this->hasOne(MetaNotificationMap::class, 'notification_id');
+    }
+
+    /** What this meta is for (meta_tag_map). */
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(Tag::class, 'meta_tag_map')->withTimestamps()->orderBy('name');
     }
 
     public function params(): HasMany

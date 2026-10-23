@@ -8,14 +8,18 @@ use App\Support\Access;
 use App\Support\MetaVersions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class MetaController extends Controller
 {
+    /** Columns that may hold a service's credentials; only admins see them. */
+    private const SECRET_COLUMNS = ['service_headers', 'service_list_body'];
+
     /** GET /metas — every meta, with its type and how many rows it has. */
     public function index(Request $request): JsonResponse
     {
-        $metas = Access::viewable(Meta::query(), $request->user())->with(['type:id,code,name', 'refMeta:id,code,name', 'widget:id,code,name,renderer,icon', 'links', 'notificationLink'])
+        $metas = Access::viewable(Meta::query(), $request->user())->with(['type:id,code,name', 'refMeta:id,code,name', 'widget:id,code,name,renderer,icon', 'links', 'notificationLink', 'tags'])
             ->withCount('params')
             ->orderBy('name')
             ->get();
@@ -50,17 +54,27 @@ class MetaController extends Controller
         $data['created_by'] = $request->user()->id;
         $data['updated_by'] = $request->user()->id;
 
-        $meta = Meta::create($data);
+        $tagIds = $this->tagIds($data);
 
-        return response()->json($meta->load(['type', 'refMeta', 'widget']), 201);
+        $meta = DB::transaction(function () use ($data, $tagIds) {
+            $meta = Meta::create($data);
+            if ($tagIds !== null) {
+                $meta->tags()->sync($tagIds);
+            }
+
+            return $meta;
+        });
+
+        return response()->json($meta->load(['type', 'refMeta', 'widget', 'tags'])->makeVisible(self::SECRET_COLUMNS), 201);
     }
 
     /** GET /metas/{meta} */
     public function show(Request $request, Meta $meta): JsonResponse
     {
         Access::require($request->user(), $meta, 'view');
+        $meta->load(['type', 'refMeta', 'widget', 'tags']);
 
-        return response()->json($meta->load(['type', 'refMeta', 'widget']));
+        return response()->json($request->user()?->isAdmin() ? $meta->makeVisible(self::SECRET_COLUMNS) : $meta);
     }
 
     /** PUT/PATCH /metas/{meta} */
@@ -70,9 +84,16 @@ class MetaController extends Controller
         $data = $this->validated($request, $meta);
         $data['updated_by'] = $request->user()->id;
 
-        $meta->update($data);
+        $tagIds = $this->tagIds($data);
 
-        return response()->json($meta->fresh()->load(['type', 'refMeta', 'widget']));
+        DB::transaction(function () use ($meta, $data, $tagIds) {
+            $meta->update($data);
+            if ($tagIds !== null) {
+                $meta->tags()->sync($tagIds);
+            }
+        });
+
+        return response()->json($meta->fresh()->load(['type', 'refMeta', 'widget', 'tags'])->makeVisible(self::SECRET_COLUMNS));
     }
 
     /**
@@ -111,7 +132,19 @@ class MetaController extends Controller
             'before_save_expression_string' => ['nullable', 'string'],
             'after_save_expression_string' => ['nullable', 'string'],
             'var_fnc_expression_string' => ['nullable', 'string'],
+            // An external service instead of a table (see ExternalService).
+            'service_url' => ['nullable', 'string', 'max:2048', 'regex:/^(https?:\/\/|\{)/i'],
+            'service_headers' => ['nullable', 'json'],
+            'service_query' => ['nullable', 'json'],
+            'service_list_body' => ['nullable', 'json'],
+            'service_list_path' => ['nullable', 'string', 'max:255'],
+            'service_total_path' => ['nullable', 'string', 'max:255'],
+            'service_record_path' => ['nullable', 'string', 'max:255'],
+            'service_update_method' => ['nullable', Rule::in(['PUT', 'PATCH', 'put', 'patch'])],
             'json_config' => ['nullable', 'array'],
+            // What the meta is for; leaving it out keeps its tags.
+            'tag_ids' => ['sometimes', 'array'],
+            'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'],
         ]);
 
         if (! empty($data['ref_meta_id']) && $current && (int) $data['ref_meta_id'] === $current->id) {
@@ -119,5 +152,18 @@ class MetaController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Takes tag_ids out of the validated data: the tags to set, or null to keep them.
+     *
+     * @return list<int>|null
+     */
+    private function tagIds(array &$data): ?array
+    {
+        $ids = array_key_exists('tag_ids', $data) ? array_map('intval', $data['tag_ids'] ?? []) : null;
+        unset($data['tag_ids']);
+
+        return $ids;
     }
 }

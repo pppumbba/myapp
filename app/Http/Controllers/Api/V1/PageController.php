@@ -35,7 +35,7 @@ class PageController extends Controller
         $this->requirePage($meta);
 
         $params = MetaParam::where('main_meta_id', $meta->id)->where('is_show', true)->orderBy('order_number')->get();
-        $widgets = Meta::with('widget')->whereIn('id', $params->pluck('ref_meta_id')->filter())->get()
+        $widgets = Meta::with(['widget', 'links', 'notificationLink'])->whereIn('id', $params->pluck('ref_meta_id')->filter())->get()
             ->filter(fn (Meta $w) => Access::can($request->user(), $w, 'view'))->keyBy('id');
 
         return response()->json([

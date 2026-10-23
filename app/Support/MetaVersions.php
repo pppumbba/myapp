@@ -27,6 +27,9 @@ class MetaVersions
     /** Columns that say when or by whom, not what: never compared. */
     private const IGNORED = ['created_at', 'updated_at', 'created_by', 'updated_by'];
 
+    /** Minutes one person's changes in a row go between automatic versions (see keepBefore). */
+    public const AUTO_EVERY = 10;
+
     /** What the meta row points at: column => [table, needed]. */
     private const META_REFS = ['type_id' => ['meta_types', true], 'ref_meta_id' => ['metas', false], 'widget_id' => ['widgets', false]];
 
@@ -66,6 +69,7 @@ class MetaVersions
             'notification' => ['table' => 'meta_notification_map', 'scope' => $own('notification_id'), 'self' => [], 'refs' => [
                 'meta_id' => ['metas', false], 'status_id' => ['wfm_status', false],
             ]],
+            'tags' => ['table' => 'meta_tag_map', 'scope' => $own('meta_id'), 'self' => [], 'refs' => ['tag_id' => ['tags', true]]],
         ];
     }
 
@@ -111,13 +115,13 @@ class MetaVersions
         return self::matching($metaId) === null && DB::table('metas')->where('id', $metaId)->exists();
     }
 
-    /** Saves the meta as it is now as its next version. */
-    public static function save(int $metaId, ?User $user, ?string $note): MetaVersion
+    /** Saves the meta as it is now (or as a snapshot of it had it) as its next version. */
+    public static function save(int $metaId, ?User $user, ?string $note, ?array $snapshot = null, bool $auto = false): MetaVersion
     {
-        $snapshot = self::snapshot($metaId);
+        $snapshot ??= self::snapshot($metaId);
         abort_if($snapshot === null, 404, 'This meta does not exist.');
 
-        return DB::transaction(function () use ($metaId, $snapshot, $user, $note) {
+        return DB::transaction(function () use ($metaId, $snapshot, $user, $note, $auto) {
             $next = (int) MetaVersion::where('meta_id', $metaId)->lockForUpdate()->max('version_no') + 1;
 
             return MetaVersion::create([
@@ -128,9 +132,40 @@ class MetaVersions
                 'note' => $note,
                 'snapshot' => $snapshot,
                 'hash' => self::hash($snapshot),
+                'is_auto' => $auto,
                 'created_by' => $user?->id,
             ]);
         });
+    }
+
+    /**
+     * After a change: keeps the meta as it was before (the snapshot) as a version, unless
+     * nothing changed or a version already holds it. Someone changing what another person
+     * left always gets one; one person's own run of changes gets one per AUTO_EVERY minutes.
+     * The meta is stamped as last changed by the user.
+     */
+    public static function keepBefore(array $before, ?User $user): ?MetaVersion
+    {
+        $metaId = (int) $before['meta']['id'];
+        $after = self::snapshot($metaId);
+        $hash = self::hash($before);
+        if ($after === null || self::hash($after) === $hash) {
+            return null;
+        }
+
+        DB::table('metas')->where('id', $metaId)->update(['updated_by' => $user?->id, 'updated_at' => now()]);
+
+        if (MetaVersion::where('meta_id', $metaId)->where('hash', $hash)->exists()) {
+            return null;
+        }
+        $ownRun = $user && (int) ($before['meta']['updated_by'] ?? 0) === $user->id
+            && MetaVersion::where('meta_id', $metaId)->where('is_auto', true)->where('created_by', $user->id)
+                ->where('created_at', '>=', now()->subMinutes(self::AUTO_EVERY))->exists();
+        if ($ownRun) {
+            return null;
+        }
+
+        return self::save($metaId, $user, 'Before a change by '.($user->name ?? 'someone'), $before, true);
     }
 
     /** Saves a version first when there are changes to lose, e.g. before a restore or a delete. */
@@ -295,6 +330,7 @@ class MetaVersions
             'process_behaviours' => 'Value '.$row['source_path'].' → '.$row['target_path'],
             'links' => ucfirst($row['type']).' → '.$metaName($row['trg_meta_id']).($row['trg_path'] ? " ({$row['src_path']} → {$row['trg_path']})" : ''),
             'notification' => 'Watches '.($metaName($row['meta_id']) ?? 'nothing'),
+            'tags' => 'Tag '.(DB::table('tags')->where('id', $row['tag_id'])->value('name') ?? "#{$row['tag_id']}"),
             default => "#{$row['id']}",
         };
     }

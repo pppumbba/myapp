@@ -15,7 +15,7 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $this->call([MetaTypeSeeder::class, WidgetSeeder::class, ProcurementDemoSeeder::class, CalendarDemoSeeder::class, GanttDemoSeeder::class, LmsDemoSeeder::class, TenderDemoSeeder::class]);
+        $this->call([MetaTypeSeeder::class, WidgetSeeder::class, ProcurementDemoSeeder::class, CalendarDemoSeeder::class, GanttDemoSeeder::class, LmsDemoSeeder::class, TenderDemoSeeder::class, EamDemoSeeder::class]);
 
         // User::factory(10)->create();
 
